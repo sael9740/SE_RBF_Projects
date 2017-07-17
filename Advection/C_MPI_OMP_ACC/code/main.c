@@ -5,6 +5,7 @@
 
 #include "include/config.h"
 #include "include/io.h"
+#include "include/rbffd.h"
 
 
 int mpi_size;
@@ -30,9 +31,10 @@ int main(int argc, char** argv) {
 	
 	nodeset_struct ns1 = get_ns1(adv_params.nodesetFile);
 
-	if (mpi_rank == 0)
-		print_ns1(ns1);
-
+	double* dist_matrix;
+	if (mpi_rank == 0) {
+		get_rbffd_DMs(ns1);
+	}
 
 	// ============================ Free Remaining Data Space ================================ //
 	
@@ -68,6 +70,8 @@ void print_ns1(nodeset_struct ns1) {
 	printf("Unit Nodeset:\n\tNh = %d\n\tNv = %d\n", ns1.Nh, ns1.Nv);
 
 	for (int i = 0; i < ns1.Nh; i++) {
-		printf("\t\tnodeid = %3d:  x = %4.2f,  y = %4.2f,  z = %e\n", i, ns1.x[i], ns1.y[i], ns1.z[i]);
+		printf("\t\tnodeid = %3d:  x = %4.2f,  y = %4.2f,  z = %4.2f\n", i, ns1.x[i], ns1.y[i], ns1.z[i]);
 	}
 }
+
+
