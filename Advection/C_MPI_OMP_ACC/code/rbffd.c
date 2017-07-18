@@ -1,8 +1,8 @@
 #include "include/rbffd.h"
 #include <stdlib.h>
 #include <stdio.h>
-#include <lapacke.h>
 #include <math.h>
+#include <mkl_lapacke.h>
 
 int* get_idx(double* D2, size_t Nh, size_t n);
 double* get_D2(nodeset_struct ns1);
