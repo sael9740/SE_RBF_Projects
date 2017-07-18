@@ -13,8 +13,6 @@ int mpi_rank;
 
 adv_params_struct get_adv_params();
 
-void print_ns1(nodeset_struct ns1);
-
 int main(int argc, char** argv) {
 
 	// ============================ Startup MPI ================================ //
@@ -29,18 +27,26 @@ int main(int argc, char** argv) {
 	
 	// ============================ Initialize Nodeset ================================ //
 	
+	// read unit sphere nodeset from file
 	nodeset_struct ns1 = get_ns1(adv_params.nodesetFile);
 
-	double* dist_matrix;
-	if (mpi_rank == 0) {
-		get_rbffd_DMs(ns1);
-	}
+	// get distance^2 quadrature weights
+	double* D = get_D(ns1);
+
+	// get n-nearest neighbor stencils
+	int* idx = get_idx(D, ns1.Nh, adv_params.n);
+	
+	//if (mpi_rank == 0) {
+	//	get_rbffd_DMs(ns1, adv_params.n);
+	//}
 
 	// ============================ Free Remaining Data Space ================================ //
 	
 	free(ns1.x);
 	free(ns1.y);
 	free(ns1.z);
+	free(D);
+	free(idx);
 
 	// ============================ Finalize MPI ================================ //
 	
@@ -53,11 +59,13 @@ adv_params_struct get_adv_params() {
 	adv_params_struct adv_params;
 
 	strcpy(adv_params.nodesetFile, getenv("ADV_NODESET_FILE"));
+	adv_params.n = atoi(getenv("ADV_STENCIL_SIZE"));
 
 	if (mpi_rank == 0) {
 		printf("\n======================================= Advection Solver Parameterizations ====================================\n\n");
 
 		printf("ADV_NODESET_FILE:\t%s\n", adv_params.nodesetFile);
+		printf("ADV_STENCIL_SIZE:\t%d\n", adv_params.n);
 
 		printf("\n===============================================================================================================\n\n");
 	}
@@ -65,13 +73,5 @@ adv_params_struct get_adv_params() {
 	return adv_params;
 }
 
-void print_ns1(nodeset_struct ns1) {
-
-	printf("Unit Nodeset:\n\tNh = %d\n\tNv = %d\n", ns1.Nh, ns1.Nv);
-
-	for (int i = 0; i < ns1.Nh; i++) {
-		printf("\t\tnodeid = %3d:  x = %4.2f,  y = %4.2f,  z = %4.2f\n", i, ns1.x[i], ns1.y[i], ns1.z[i]);
-	}
-}
 
 

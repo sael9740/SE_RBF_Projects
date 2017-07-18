@@ -8,6 +8,7 @@
 typedef struct adv_params_struct {
 
 	char nodesetFile[MAX_PATH_SIZE];
+	size_t n;
 
 } adv_params_struct;
 
