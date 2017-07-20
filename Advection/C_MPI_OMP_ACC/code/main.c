@@ -5,14 +5,14 @@
 
 #include "include/config.h"
 #include "include/io.h"
+#include "include/init_domains.h"
+#include "include/patches.h"
 
 
 int mpi_size;
 int mpi_rank;
 
-adv_params_struct get_adv_params();
-
-void print_ns1(nodeset_struct ns1);
+void get_adv_params(adv_params_struct* adv_params);
 
 int main(int argc, char** argv) {
 
@@ -24,50 +24,57 @@ int main(int argc, char** argv) {
 	
 	// ============================ Get Environment Parameters ================================ //
 	
-	adv_params_struct adv_params = get_adv_params();
+	adv_params_struct adv_params[1];
+	get_adv_params(adv_params);
 	
 	// ============================ Initialize Nodeset ================================ //
 	
-	nodeset_struct ns1 = get_ns1(adv_params.nodesetFile);
+	// read unit sphere nodeset from file
+	unit_nodeset_struct ns1[1];
+	init_ns1(ns1, adv_params);
 
-	if (mpi_rank == 0)
-		print_ns1(ns1);
+	// reorder nodes in ns1 for contiguous patch data
+	reorder_ns1(ns1);
 
+	// initialize local rank's patch data
+	patch_struct LP[1];
+	init_patches(LP, ns1, adv_params);
 
 	// ============================ Free Remaining Data Space ================================ //
-	
-	free(ns1.x);
-	free(ns1.y);
-	free(ns1.z);
+
+	free(ns1->x);
+	free(ns1->y);
+	free(ns1->z);
+	free(ns1->D_idx);
+	free(ns1->idx);
+	free(ns1->patch_ids);
+	free(ns1->patch_start_ids);
+	free(ns1->patch_sizes);
 
 	// ============================ Finalize MPI ================================ //
 	
 	MPI_Barrier(MPI_COMM_WORLD);
 	MPI_Finalize();
+	
 }
 
-adv_params_struct get_adv_params() {
+void get_adv_params(adv_params_struct* adv_params) {
 
-	adv_params_struct adv_params;
-
-	strcpy(adv_params.nodesetFile, getenv("ADV_NODESET_FILE"));
+	strcpy(adv_params->nodesetFile, getenv("ADV_NODESET_FILE"));
+	adv_params->n = atoi(getenv("ADV_STENCIL_SIZE"));
+	adv_params->Nv = atoi(getenv("ADV_NVERT_LVLS"));
 
 	if (mpi_rank == 0) {
 		printf("\n======================================= Advection Solver Parameterizations ====================================\n\n");
 
-		printf("ADV_NODESET_FILE:\t%s\n", adv_params.nodesetFile);
+		printf("ADV_NODESET_FILE:\t%s\n", adv_params->nodesetFile);
+		printf("ADV_STENCIL_SIZE:\t%d\n", adv_params->n);
+		printf("ADV_NVERT_LVLS:  \t%d\n", adv_params->Nv);
 
 		printf("\n===============================================================================================================\n\n");
 	}
 
-	return adv_params;
 }
 
-void print_ns1(nodeset_struct ns1) {
 
-	printf("Unit Nodeset:\n\tNh = %d\n\tNv = %d\n", ns1.Nh, ns1.Nv);
 
-	for (int i = 0; i < ns1.Nh; i++) {
-		printf("\t\tnodeid = %3d:  x = %4.2f,  y = %4.2f,  z = %e\n", i, ns1.x[i], ns1.y[i], ns1.z[i]);
-	}
-}
