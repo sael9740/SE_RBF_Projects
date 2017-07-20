@@ -1,4 +1,4 @@
-CC = mpicc
+CC = mpicc -g
 
 ### MKL include/libs from https://software.intel.com/en-us/articles/intel-mkl-link-line-advisor
 MKLFLAGS = -DMKL_ILP64 -I${MKLROOT}/include
@@ -11,11 +11,15 @@ OMPFLAGS = -mp
 # MKLLIBS += -lmkl_blacs_intelmpi_ilp64
 # OMPFLAGS = -fopenmp
 
-CFLAGS = $(OMPFLAGS) $(MKLFLAGS)
-LIBS = $(MKLLIBS)
+### METIS
+METISFLAGS = -I$(METISROOT)/include
+METISLIBS = -L$(METISROOT)/lib -lmetis
+
+CFLAGS = $(OMPFLAGS) $(MKLFLAGS) $(METISFLAGS)
+LIBS = $(MKLLIBS) $(METISLIBS)
 
 
-OBJS = main.o io.o rbffd.o
+OBJS = main.o io.o init_domains.o patches.o
 
 EXE = adv_solver.exe
 
