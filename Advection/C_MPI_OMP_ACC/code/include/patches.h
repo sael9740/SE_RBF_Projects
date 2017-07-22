@@ -3,7 +3,8 @@
 
 #include "config.h"
 
-void init_patches(patch_struct* LP, unit_nodeset_struct* np1, adv_params_struct* adv_params);
+void init_patches(patch_struct* LP, nodeset_struct* nodeset);
 
 void checkpoint(int num);
+
 #endif

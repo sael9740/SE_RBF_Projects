@@ -11,38 +11,39 @@
 extern int mpi_rank;
 extern int mpi_size;
 
+extern config_struct config;
 
 void print_fp_matrix(double* A, int dim1, int dim2);
 void print_int_matrix(int* A, int dim1, int dim2);
 
-void init_ns1(unit_nodeset_struct* ns1, adv_params_struct* adv_params) {
+void init_nodeset(nodeset_struct* nodeset) {
 
-	ns1->n = adv_params->n;
-	get_ns1_xyz(adv_params->nodesetFile, ns1);
+	nodeset->n = config.stencil_size;
+	get_nodeset(nodeset);
 	
-	int Nh = ns1->Nh;
+	int Nh = nodeset->Nh;
 
 	// determine mpi loop partitioning for calculating D and determining idx
 	int start_id = (Nh/mpi_size) * mpi_rank;
 	int size = mpi_rank == mpi_size-1 ? Nh : (Nh/mpi_size) * (mpi_rank+1); size -= start_id;
 
 	// get quadrature weights
-	double* D_r = get_D_r(ns1, start_id, size);
+	double* D_r = get_D_r(nodeset, start_id, size);
 
 	// get n-nearest neighbor stencils
-	get_idx(D_r, ns1, start_id, size);
+	get_idx(D_r, nodeset, start_id, size);
 	
 	// use metis to determine MPI patch partitioning
-	get_partitions(ns1);
+	get_partitions(nodeset);
 
 	free(D_r);
 }
 
 // calculate quadrature weights (euclidian distances) for all node pairings 
 // returns horizontal slice of D matrix for each mpi rank
-double* get_D_r(unit_nodeset_struct* ns1, int start_id, int size) {
+double* get_D_r(nodeset_struct* nodeset, int start_id, int size) {
 
-	int Nh = ns1->Nh;
+	int Nh = nodeset->Nh;
 
 	// allocate space for D matrix
 	double* D_r = (double*) malloc(sizeof(double) * Nh * size);
@@ -51,9 +52,9 @@ double* get_D_r(unit_nodeset_struct* ns1, int start_id, int size) {
 	#pragma omp parallel for simd
 	for (int i = 0; i < size; i++) {
 		for (int j = 0; j < Nh; j++) {
-			D_r[(i*Nh) + j] = sqrt(pow(ns1->x[i+start_id] - ns1->x[j], 2) 
-						+ pow(ns1->y[i+start_id] - ns1->y[j], 2) 
-						+ pow(ns1->z[i+start_id] - ns1->z[j], 2));
+			D_r[(i*Nh) + j] = sqrt(pow(nodeset->x[i+start_id] - nodeset->x[j], 2) 
+						+ pow(nodeset->y[i+start_id] - nodeset->y[j], 2) 
+						+ pow(nodeset->z[i+start_id] - nodeset->z[j], 2));
 		}
 	}
 
@@ -61,10 +62,10 @@ double* get_D_r(unit_nodeset_struct* ns1, int start_id, int size) {
 }
 
 // determine n-nearest neighbor stencils for each node
-void get_idx(double* D_r, unit_nodeset_struct* ns1, int start_id, int size) {
+void get_idx(double* D_r, nodeset_struct* nodeset, int start_id, int size) {
 
-	int Nh = ns1->Nh;
-	int n = ns1->n;
+	int Nh = nodeset->Nh;
+	int n = nodeset->n;
 	
 	// allocate space for idx and D_idx
 	int* idx = (int*) malloc(sizeof(int) * Nh * n);
@@ -130,17 +131,17 @@ void get_idx(double* D_r, unit_nodeset_struct* ns1, int start_id, int size) {
 	}*/
 
 
-	ns1->idx = idx;
-	ns1->D_idx = D_idx;
+	nodeset->idx = idx;
+	nodeset->D_idx = D_idx;
 
 }
 
 // get mpi partitioning of the domain using metis
-void get_partitions(unit_nodeset_struct* ns1) {
+void get_partitions(nodeset_struct* nodeset) {
 
-	int* idx = ns1->idx;
-	int Nh = ns1->Nh;
-	int n = ns1->n;
+	int* idx = nodeset->idx;
+	int Nh = nodeset->Nh;
+	int n = nodeset->n;
 
 	// variables for metis
 	idx_t Nvert = Nh;
@@ -197,14 +198,14 @@ void get_partitions(unit_nodeset_struct* ns1) {
 		MPI_Barrier(MPI_COMM_WORLD);
 	}*/
 
-	ns1->patch_ids = (int*) patch_ids;
+	nodeset->patch_ids = (int*) patch_ids;
 
 }
 
-void reorder_ns1(unit_nodeset_struct* ns1) {
+void reorder_nodeset(nodeset_struct* nodeset) {
 
-	int Nh = ns1->Nh;
-	int n = ns1->n;
+	int Nh = nodeset->Nh;
+	int n = nodeset->n;
 	
 	// allocate dataspace
 	int* patch_ids = (int*) malloc(sizeof(int) * Nh);
@@ -224,7 +225,7 @@ void reorder_ns1(unit_nodeset_struct* ns1) {
 
 		for (int i = 0; i < Nh; i++) {
 
-			if (ns1->patch_ids[i] == rank) {
+			if (nodeset->patch_ids[i] == rank) {
 				patch_ids[counter1] = rank;
 				mapping[i] = counter1;
 				inv_mapping[counter1] = i;
@@ -240,11 +241,15 @@ void reorder_ns1(unit_nodeset_struct* ns1) {
 	double* x = (double*) malloc(sizeof(double) * Nh);
 	double* y = (double*) malloc(sizeof(double) * Nh);
 	double* z = (double*) malloc(sizeof(double) * Nh);
+	double* lambda = (double*) malloc(sizeof(double) * Nh);
+	double* phi = (double*) malloc(sizeof(double) * Nh);
 
 	for (int i = 0; i < Nh; i++) {
-		x[i] = ns1->x[inv_mapping[i]];
-		y[i] = ns1->y[inv_mapping[i]];
-		z[i] = ns1->z[inv_mapping[i]];
+		x[i] = nodeset->x[inv_mapping[i]];
+		y[i] = nodeset->y[inv_mapping[i]];
+		z[i] = nodeset->z[inv_mapping[i]];
+		lambda[i] = nodeset->lambda[inv_mapping[i]];
+		phi[i] = nodeset->phi[inv_mapping[i]];
 	}
 
 	// reorder D_idx matrix
@@ -252,7 +257,7 @@ void reorder_ns1(unit_nodeset_struct* ns1) {
 	
 	for (int i = 0; i < Nh; i++) {
 		for (int j = 0; j < n; j++) {
-			D_idx[(i*n) + j] = ns1->D_idx[(inv_mapping[i]*n) + j];
+			D_idx[(i*n) + j] = nodeset->D_idx[(inv_mapping[i]*n) + j];
 		}
 	}
 	
@@ -262,7 +267,7 @@ void reorder_ns1(unit_nodeset_struct* ns1) {
 
 	for (int i = 0; i < Nh; i++) {
 		for (int j = 0; j < n; j++) {
-			idx[(i*n) + j] = mapping[ns1->idx[(inv_mapping[i]*n) + j]];
+			idx[(i*n) + j] = mapping[nodeset->idx[(inv_mapping[i]*n) + j]];
 		}
 	}
 
@@ -270,36 +275,40 @@ void reorder_ns1(unit_nodeset_struct* ns1) {
 	/*if (mpi_rank == 0) {
 		printf("\n\npatch_ids: \n\t");
 		for (int i = 0; i < Nh; i++)
-			printf("%d\t",ns1->patch_ids[i]);
+			printf("%d\t",nodeset->patch_ids[i]);
 		printf("\n\nOld idx matrix:\n\n");
-		print_int_matrix(ns1->idx, Nh, n);
+		print_int_matrix(nodeset->idx, Nh, n);
 		printf("\n\nNew idx matrix:\n\n");
 		print_int_matrix(idx, Nh, n);
 		printf("\n\nOld D_idx matrix:\n\n");
-		print_fp_matrix(ns1->D_idx, Nh, n);
+		print_fp_matrix(nodeset->D_idx, Nh, n);
 		printf("\n\nNew D_idx matrix:\n\n");
 		print_fp_matrix(D_idx, Nh, n);
 	}*/
 
-	// Assign reordered data to ns1 and free old data
+	// Assign reordered data to nodeset and free old data
 	free(mapping);
 	free(inv_mapping);
 	
-	free(ns1->x);
-	free(ns1->y);
-	free(ns1->z);
-	free(ns1->idx);
-	free(ns1->D_idx);
-	free(ns1->patch_ids);
+	free(nodeset->x);
+	free(nodeset->y);
+	free(nodeset->z);
+	free(nodeset->lambda);
+	free(nodeset->phi);
+	free(nodeset->idx);
+	free(nodeset->D_idx);
+	free(nodeset->patch_ids);
 
-	ns1->patch_sizes = patch_sizes;
-	ns1->patch_start_ids = patch_start_ids;
-	ns1->patch_ids = patch_ids;
-	ns1->idx = idx;
-	ns1->D_idx = D_idx;
-	ns1->x = x;
-	ns1->y = y;
-	ns1->z = z;
+	nodeset->patch_sizes = patch_sizes;
+	nodeset->patch_start_ids = patch_start_ids;
+	nodeset->patch_ids = patch_ids;
+	nodeset->idx = idx;
+	nodeset->D_idx = D_idx;
+	nodeset->x = x;
+	nodeset->y = y;
+	nodeset->z = z;
+	nodeset->lambda = lambda;
+	nodeset->phi = phi;
 
 
 }

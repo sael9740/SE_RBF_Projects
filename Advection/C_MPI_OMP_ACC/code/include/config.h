@@ -5,16 +5,71 @@
 
 #define MAX_PATH_SIZE 200
 
-typedef struct adv_params_struct {
+#define GHOST_LAYER_DEPTH 3
 
-	int Nv;
-	int n;
+#define MEM_ALIGNMENT 8
 
-	char nodesetFile[MAX_PATH_SIZE];
+#ifndef SIMD_LENGTH
+  #define SIMD_LENGTH 8
+#endif
 
-} adv_params_struct;
+#define PAD_UP(N,M) (((((N)-1)/(M))+1)*(M))
+#define PAD_DOWN(N,M) (((N)/(M))*(M))
 
-typedef struct unit_nodeset_struct {
+// ================= Default Config Parameterizations =================== //
+
+#define DEFAULT_NUM_LAYERS 32
+#define DEFAULT_STENCIL_SIZE 55
+#define DEFAULT_MODEL_HEIGHT 12000.0
+#define DEFAULT_TIMESTEP 600.0
+
+// ========================= Physical Constants ========================= //
+
+#define EARTH_RADIUS 6.37122e6
+
+/* CONFIG STRUCT
+ * PURPOSE: holds all data associated with the runtime environment configuration 
+ * options such as input files, rbf stencil size, number of levels, etc.
+ */
+typedef struct config_struct {
+
+	int num_nodes;
+	int num_layers;
+	int stencil_size;
+
+	double h_top;
+	double dt;
+
+	char nodeset_input_file[MAX_PATH_SIZE];
+
+} config_struct;
+
+/* GLOBAL PARAMETERS STRUCT
+ * PURPOSE: holds all globally valid definitions and constants such as the 
+ * global nodeset, vertical layer desciptions, physical constants, etc.
+ */
+typedef struct global_params_struct {
+
+	int Nh;		// Number of node points in global domain
+	
+	int Nv;		// Number of vertical layers
+	int Nv_compute;	// Number of vertical compute layers
+	
+	int n;		// RBF-FD stencil size
+
+	double R_e;	// radius of earth (m)
+	double h_top;	// model atmosphere height (m)
+	double dh;	// height of vertical layers
+	double dt;	// timestep 
+
+} global_params_struct;
+
+/* NODESET STRUCT
+ * PURPOSE: Holds all data required to describe a particular nodeset as 
+ * well as useful information closely associated with the dataset such
+ * as distances and MPI partitioning information
+ */
+typedef struct nodeset_struct {
 	
 	int Nh;
 	int Nv;
@@ -34,8 +89,15 @@ typedef struct unit_nodeset_struct {
 	int* patch_sizes;
 	int* patch_start_ids;
 
-} unit_nodeset_struct;
+} nodeset_struct;
 
+//typedef struct global_domain_struct {} global_domain_struct;
+
+/* HALO STRUCT
+ * PURPOSE: Holds all data required for MPI halo layer communication with a single
+ * neighboring patch such as the neghbors rank and mappings describing the halo 
+ * layers in both domains.
+ */
 typedef struct halo_struct {
 	
 	// neighboring patch's mpi rank
@@ -58,14 +120,17 @@ typedef struct halo_struct {
 
 } halo_struct;
 
-//typedef struct global_domain_struct {} global_domain_struct;
-
+/* PATCH STRUCT
+ * PURPOSE: Holds ALL data associated with an MPI patch including 
+ * the nodeset, state variables, and the halo layer descriptions
+ * necessary for MPI communication (see halo_struct below)
+ */
 typedef struct patch_struct {
 
 	// ==================== Patch Nodeset Description ========================= //
 
 	// dimensions
-	int Nh;		// Number of horizontal node points in local patch
+	int Nh;		// Number of node points in local patch
 	int Nv;		// Number of vertical layers
 
 	// cartesian coordinates of horizontal nodeset (on unit sphere), shape -> (Nh)
@@ -84,7 +149,7 @@ typedef struct patch_struct {
 	double* h;
 	
 	
-	// ================ Mappings to/from Global Domain ====================== //
+	// ================= Mappings to/from Global Domain ====================== //
 	
 	// pid -> local patch horizontal node id
 	// gid -> global domain horizontal node id
@@ -96,7 +161,7 @@ typedef struct patch_struct {
 	int* pid_map;
 
 
-	// ===================== Compute Domain Description ===================== //
+	// ====================== Compute Domain Description ===================== //
 	
 	// compute domain size
 	int compute_size;
@@ -105,7 +170,7 @@ typedef struct patch_struct {
 	int* compute_pids;
 
 
-	// ====================== Halo Layer Description ======================== //
+	// ======================= Halo Layer Description ======================== //
 	
 	// Number of neighbor patches
 	int Nnbrs;

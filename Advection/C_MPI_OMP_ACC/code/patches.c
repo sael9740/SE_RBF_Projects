@@ -9,16 +9,18 @@
 extern int mpi_rank;
 extern int mpi_size;
 
-void exchange_halos_1D(double* var, patch_struct* LP);
-void print_patch_xyz(patch_struct* LP);
+extern config_struct config;
 
-void init_patches(patch_struct* LP, unit_nodeset_struct* ns1, adv_params_struct* adv_params) {
+void exchange_halos_1D(double* var, patch_struct* LP);
+void print_patch_nodeset(patch_struct* LP);
+
+void init_patches(patch_struct* LP, nodeset_struct* nodeset) {
 
 	// extract frequently used constants
-	int Nh_global = ns1->Nh;
-	int n = adv_params->n;
-	int Nv = adv_params->Nv;
-	int compute_size = ns1->patch_sizes[mpi_rank];
+	int Nh_global = nodeset->Nh;
+	int n = config.stencil_size;
+	int Nv = config.num_layers;
+	int compute_size = nodeset->patch_sizes[mpi_rank];
 
 	// matrix to hold halo sizes between each patch
 	int* adjcny_mat = (int*) calloc(pow(mpi_size, 2), sizeof(int));
@@ -27,12 +29,12 @@ void init_patches(patch_struct* LP, unit_nodeset_struct* ns1, adv_params_struct*
 	int* dependency_mask = (int*) calloc(Nh_global, sizeof(int));
 
 	// iterate through patch's idx to set adjcny_mat and dependency_mask
-	int i_start = ns1->patch_start_ids[mpi_rank];
+	int i_start = nodeset->patch_start_ids[mpi_rank];
 	for (int i = i_start; i < i_start + compute_size; i++) {
 		for (int j = 0; j < n; j++) {
 			
-			int gid_ij = ns1->idx[(i * n) + j];
-			int patch_id_ij = ns1->patch_ids[gid_ij];
+			int gid_ij = nodeset->idx[(i * n) + j];
+			int patch_id_ij = nodeset->patch_ids[gid_ij];
 			
 			if (dependency_mask[gid_ij] == 0) {
 				dependency_mask[gid_ij] = 1;
@@ -92,15 +94,19 @@ void init_patches(patch_struct* LP, unit_nodeset_struct* ns1, adv_params_struct*
 	}
 
 	// assign x,y,z for compute nodes
-	double* x = (double*) calloc(Nh, sizeof(double));
-	double* y = (double*) calloc(Nh, sizeof(double));
-	double* z = (double*) calloc(Nh, sizeof(double));
+	double* x = (double*) malloc(sizeof(double) * Nh);
+	double* y = (double*) malloc(sizeof(double) * Nh);
+	double* z = (double*) malloc(sizeof(double) * Nh);
+	double* lambda = (double*) malloc(sizeof(double) * Nh);
+	double* phi = (double*) malloc(sizeof(double) * Nh);
 
 	for (int i = 0; i < Nh; i++) {
 		int gid = gid_map[i];
-		x[i] = ns1->x[gid];
-		y[i] = ns1->y[gid];
-		z[i] = ns1->z[gid];
+		x[i] = nodeset->x[gid];
+		y[i] = nodeset->y[gid];
+		z[i] = nodeset->z[gid];
+		lambda[i] = nodeset->lambda[gid];
+		phi[i] = nodeset->phi[gid];
 	}
 
 	// Debugging	
@@ -111,7 +117,7 @@ void init_patches(patch_struct* LP, unit_nodeset_struct* ns1, adv_params_struct*
 			//print_int_matrix(gid_map, 1, Nh);
 
 			//print_int_matrix(adjcny_mat, mpi_size, mpi_size);
-			//print_int_matrix(ns1->patch_start_ids, 1, Nh_global);
+			//print_int_matrix(nodeset->patch_start_ids, 1, Nh_global);
 		}
 		MPI_Barrier(MPI_COMM_WORLD);
 	}
@@ -175,6 +181,8 @@ void init_patches(patch_struct* LP, unit_nodeset_struct* ns1, adv_params_struct*
 	LP->x = x;
 	LP->y = y;
 	LP->z = z;
+	LP->lambda = lambda;
+	LP->phi = phi;
 
 	LP->gid_map = gid_map;
 	LP->pid_map = pid_map;
@@ -185,7 +193,6 @@ void init_patches(patch_struct* LP, unit_nodeset_struct* ns1, adv_params_struct*
 	LP->Nnbrs = Nnbrs;
 	LP->halos = halos;
 
-	print_patch_xyz(LP);
 
 }
 
@@ -216,17 +223,17 @@ void exchange_halos_1D(double* var, patch_struct* LP) {
 	MPI_Waitall(Nnbrs * 2, request, status);
 }
 
-void print_patch_xyz(patch_struct* LP) {
+void print_patch_nodeset(patch_struct* LP) {
 
 	for (int rank = 0; rank < mpi_size; rank++) {
 		if (mpi_rank == rank) {
-			printf("\nRank = %d:\n", rank);
+			printf("\nRank = %d:\n", rank); fflush(stdout);
 			for (int i = 0; i < LP->Nh; i++) {
-				printf("\tpid,gid -> %6d,%6d\tx = %4.3f\ty = %4.3f\tz = %4.3f\n", i, LP->gid_map[i], LP->x[i], LP->y[i], LP->z[i]);
+				printf("\tpid,gid -> %6d,%6d\tx = %4.3f\ty = %4.3f\tz = %4.3f\tl = %4.3f\tp = %4.3f\n",
+						i, LP->gid_map[i], LP->x[i], LP->y[i], LP->z[i], LP->lambda[i], LP->phi[i]); fflush(stdout);
 			}
-			printf("\n");
+			printf("\n"); fflush(stdout);
 		}
-		fflush(stdout);
 		MPI_Barrier(MPI_COMM_WORLD);
 	}
 }
