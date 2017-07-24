@@ -19,7 +19,7 @@ CFLAGS = $(OMPFLAGS) $(MKLFLAGS) $(METISFLAGS)
 LIBS = $(MKLLIBS) $(METISLIBS)
 
 
-OBJS = main.o io.o init_domains.o patches.o
+OBJS = main.o wrappers.o debug.o nodesets.o layers.o domains.o patches.o rbffd_DMs.o
 
 EXE = adv_solver.exe
 
