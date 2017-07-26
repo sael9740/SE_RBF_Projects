@@ -7,11 +7,20 @@
 #define ADV_CONFIG_H
 
 #include <stdlib.h>
+#include <mpi.h>
 
-#define GHOST_LAYER_DEPTH 3
+#define TEST_CASE 2
+
 #define RBF_POLY_ORDER 5
 #define RBF_NPOLY(ORDER)  (((ORDER + 1) * (ORDER + 2))/2)
 #define RBF_PHS_ORDER 5
+#define MAX_HYPERVISCOSITY_ORDER 16
+#define HYPERVISCOSITY_ORDER 4
+
+#define GHOST_SIZE 3
+#define FD1_SIZE 7
+#define UNIT_FD1_WEIGHTS {-1.0/60.0,3.0/20.0,-3.0/4.0,0.0,3.0/4.0,-3.0/20.0,1.0/60.0}
+//double unit_FD1[FD1_SIZE] = {-1.0/60.0,3.0/20.0,-3.0/4.0,0.0,3.0/4.0,-3.0/20.0,1.0/60.0};
 
 #define TRUE 1
 #define FALSE 0
@@ -40,11 +49,23 @@
 
 #define EARTH_RADIUS 6.37122e6
 #define GRAVITATIONAL_CONSTANT 9.80616e0
+#define REFERENCE_SURFACE_PRESSURE 1.0e5
+#define DRY_AIR_CP 1004.5
+#define DRY_AIR_RD 287.0
+#define ISOTHERMAL_TEMP 300.0
+#define PI 3.141592653589793
 
 typedef struct phys_constants_struct {
 
 	double R;
 	double g;
+	double p0;
+	double cp;
+	double Rd;
+	double kappa;
+	double T0;
+	double rho0;
+	double htop;
 
 } phys_constants_struct;
 
@@ -151,11 +172,13 @@ typedef struct layers_struct {
 
 	/***** Sizes/Dimensions *****/
 	int Nv;			// Number of layers inside the domain
-	int Nvg;		// Number of ghost layers at each boundary
+	int Ng;
+	int padded_Nv;
 	int Nvt;		// Number of layers in domain including ghost layers
-	int pNvt;		// Number of layers in domain including ghost layers and padding layers
+	int padded_Nvt;		// Number of layers in domain including ghost layers and padding layers
 
 	double dh;		// layer height
+	double htop;
 
 
 	/***** Coordinates *****/
@@ -260,19 +283,51 @@ typedef struct rbffds_DMs_struct {
 	int part_Nnodes;
 	int n;
 
+	double gamma;
+
 	int* idx;
 	
 	double* D;
 
 	double* H;
 
-	double* Dx;
-	double* Dy;
-	double* Dz;
-
+	double* hDx;
+	double* hDy;
+	double* hDz;
+	double* vDx;
+	double* vDy;
+	double* vDz;
 	double* L;
 
+	double* hDxp;
+	double* hDyp;
+	double vDzp[FD1_SIZE];
+
+
 } rbffd_DMs_struct;
+
+
+typedef struct patch_SV_struct {
+
+	int Ndim;
+	
+	double* SV_data;
+
+	double* halo_buff;
+	double* nbr_halo_buff;
+
+	MPI_Request* request;
+	MPI_Status* status;
+
+} patch_SV_struct;
+
+typedef struct part_SV_struct {
+
+	int Ndim;
+	double* SV_data;
+
+} part_SV_struct;
+
 
 /* PATCH STRUCT:
  * - Holds ALL data associated with an MPI patch including the nodeset, state variables, and the 
@@ -288,6 +343,8 @@ typedef struct patch_struct {
 	/***** Nodeset Data *****/
 	
 	nodeset_struct nodeset[1];		// local patch nodeset
+
+	layers_struct layers[1];
 
 	rbffd_DMs_struct rbffd_DMs[1];
 
@@ -306,6 +363,19 @@ typedef struct patch_struct {
 
 	halos_struct halos[1];		// halo layer data for all neighboring patches
 
+	/***** Patch/Partition Data *****/
+
+	patch_SV_struct* SV_q0;
+	patch_SV_struct* SV_qt;
+	patch_SV_struct* SV_qt_k;
+
+	part_SV_struct* SV_U;
+	part_SV_struct* SV_Usph;
+	part_SV_struct* SV_F;
+	part_SV_struct* SV_F_k;
+
+	part_SV_struct* SV_Hgradq;
+	part_SV_struct* SV_gradq;
 
 } patch_struct;
 

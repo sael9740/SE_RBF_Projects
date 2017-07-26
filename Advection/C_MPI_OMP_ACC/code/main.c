@@ -37,6 +37,8 @@ int main(int argc, char** argv) {
 	/***** Initialize RBFFD Matrices *****/
 	init_patch_rbffd_DMs();
 
+	/***** *****/
+	get_model_ICs();
 
 	/***** Partitioning of Global Nodeset *****/
 

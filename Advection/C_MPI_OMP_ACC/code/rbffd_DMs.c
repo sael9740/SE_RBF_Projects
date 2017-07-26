@@ -10,6 +10,11 @@
 #include "include/rbffd_DMs.h"
 #include "include/debug.h"
 
+extern int mpi_size;
+extern int mpi_rank;
+
+extern phys_constants_struct phys_constants[1];
+
 void get_part_rbffd_stencils(patch_struct* local_patch) {
 
 	rbffd_DMs_struct* rbffd_DMs = local_patch->rbffd_DMs;
@@ -84,17 +89,18 @@ void init_rbffd_HH_rot_Ms(patch_struct* local_patch) {
 			H[(partid*9) + (4*i)] = 1.0;
 		}
 		cblas_dgemm(CblasRowMajor,CblasNoTrans,CblasNoTrans,3,3,1,-beta,v,1,v,3,1.0,&H[(partid*9)],3);
-		//cblas_dgemm(CblasRowMajor,CblasNoTrans,CblasNoTrans,3,1,3,1.0,&H[(partid*9)],3,xx,1,0.0,xxp,1);
 	}
 
 	rbffd_DMs->H = H;
 
 }
 
-void get_rbffd_DMs_Dxyz(patch_struct* local_patch) {
+void get_rbffd_DMs(patch_struct* local_patch, int k_phs, int k_L, double epsilon) {
+
 
 	rbffd_DMs_struct* rbffd_DMs = local_patch->rbffd_DMs;
 	nodeset_struct* nodeset = local_patch->nodeset;
+	layers_struct* layers = local_patch->layers;
 
 	int* partid2pid = local_patch->part_pids;
 
@@ -108,19 +114,44 @@ void get_rbffd_DMs_Dxyz(patch_struct* local_patch) {
 	double* y = nodeset->y;
 	double* z = nodeset->z;
 
+	double R = phys_constants->R;
+
 	double* X = (double*) malloc(sizeof(double) * n * 3);
 	double* Xp = (double*) malloc(sizeof(double) * n * 3);
 	
 	int Npoly = RBF_NPOLY(RBF_POLY_ORDER);
-	int size = Npoly+n;
-	double* A = (double*) calloc(sizeof(double), size * size);
-	double* B = (double*) calloc(sizeof(double), size * 3);
-	double* W = (double*) calloc(sizeof(double), size * 3);
-	lapack_int* ipiv = (lapack_int*) malloc(sizeof(lapack_int)*size);
+	int size = n + Npoly;
+	int size2 = n + 1;
 
-	double* Dx = (double*) malloc(sizeof(double) * part_Nnodes * n);
-	double* Dy = (double*) malloc(sizeof(double) * part_Nnodes * n);
-	double* Dz = (double*) malloc(sizeof(double) * part_Nnodes * n);
+	double* A = (double*) calloc(sizeof(double), size * size);
+	double* A2 = (double*) calloc(sizeof(double), size2 * size2);
+	double* B = (double*) calloc(sizeof(double), size * 3);
+	double* B2 = (double*) calloc(sizeof(double), size2);
+	double* W = (double*) calloc(sizeof(double), size * 3);
+
+	lapack_int* ipiv = (lapack_int*) malloc(sizeof(lapack_int)*(size+size2));
+
+	double* hDx = (double*) malloc(sizeof(double) * part_Nnodes * n);
+	double* hDy = (double*) malloc(sizeof(double) * part_Nnodes * n);
+	double* hDz = (double*) malloc(sizeof(double) * part_Nnodes * n);
+	double* vDx = (double*) malloc(sizeof(double) * part_Nnodes * FD1_SIZE);
+	double* vDy = (double*) malloc(sizeof(double) * part_Nnodes * FD1_SIZE);
+	double* vDz = (double*) malloc(sizeof(double) * part_Nnodes * FD1_SIZE);
+	double* L = (double*) malloc(sizeof(double) * part_Nnodes * n);
+
+	double* hDxp = (double*) malloc(sizeof(double) * part_Nnodes * n);
+	double* hDyp = (double*) malloc(sizeof(double) * part_Nnodes * n);
+
+	//double* vDzp = rbffd_DMs->vDzp;
+	double vDzp[FD1_SIZE] = UNIT_FD1_WEIGHTS;
+	double* vD3p = (double*) calloc(3 * FD1_SIZE, sizeof(double));
+	double* vD3 = (double*) calloc(3 * FD1_SIZE, sizeof(double));
+
+	for (int i = 0; i < FD1_SIZE; i++) {
+		double w = vDzp[i]/layers->dh;
+		vDzp[i] = w;
+		vD3p[(3*i) + 2] = w;
+	}
 
 	for (int partid = 0; partid < part_Nnodes; partid++) {
 
@@ -153,16 +184,18 @@ void get_rbffd_DMs_Dxyz(patch_struct* local_patch) {
 				dy = yp[j] - ypi;
 				dz = zp[j] - zpi;
 				r = L2_norm(dx,dy,dz);
-				A[(i*size) + j] = phs(r, RBF_PHS_ORDER);
+				A[(i*size) + j] = phsrbf(r, RBF_PHS_ORDER);
+				A2[(i*size2) + j] = garbf(r, epsilon);
 			}
 
 			dx = xp[0] - xpi;
 			dy = yp[0] - ypi;
 			dz = zp[0] - zpi;
 			r = L2_norm(dx,dy,dz);
-			B[(3*i)] = ddri_phs(r, dx, RBF_PHS_ORDER);
-			B[(3*i) + 1] = ddri_phs(r, dy, RBF_PHS_ORDER);
+			B[(3*i)] = d1_phsrbf(r, dx, k_phs);
+			B[(3*i) + 1] = d1_phsrbf(r, dy, k_phs);
 			B[(3*i) + 2] = 0.0;
+			B2[i] = L_garbf(r, epsilon, k_L);
 
 		}
 
@@ -186,20 +219,66 @@ void get_rbffd_DMs_Dxyz(patch_struct* local_patch) {
 				A[(i*size) + j] = 0.0;
 			}
 		}
-		
-		LAPACKE_dgesv(LAPACK_ROW_MAJOR, size, 3, A, size, ipiv, B, 3);
 
+		for (int i = 0; i < n; i++) {
+			A2[(n*size2) + i] = 1.0;
+			A2[(i*size2) + n] = 1.0;
+		}
+		A2[(size2*size2) - 1] = 0.0;
+		B2[n] = 0.0;
+		
+		/*if (partid == 0 && mpi_rank == 0) {
+			printf("\nNODE %d:\tx = %1.3e\ty = %1.3e\tz = %1.3e\n",partid,X[0],X[n],X[2*n]);
+			printf("\n----> A_phs\n"); print_generic_fp_matrix(A,size,size,FALSE);
+			printf("\n----> B_phs\n"); print_generic_fp_matrix(B,size,3,FALSE);
+			printf("\n----> A_ga\n"); print_generic_fp_matrix(A2,size2,size2,FALSE);
+			printf("\n----> B_Lga\n"); print_generic_fp_matrix(B2,size2,1,FALSE);
+			printf("\n----> H\n"); print_generic_fp_matrix(H,3,3,FALSE);
+			printf("\n----> Dzp\n"); print_generic_fp_matrix(vD3p,FD1_SIZE,3,FALSE);
+		}*/
+
+		int stat1 = LAPACKE_dgesv(LAPACK_ROW_MAJOR, size, 3, A, size, ipiv, B, 3);
 		cblas_dgemm(CblasRowMajor,CblasNoTrans,CblasTrans,3,size,3,1.0,H,3,B,3,0.0,W,size);
+
+		int stat2 = LAPACKE_dgesv(LAPACK_ROW_MAJOR, size2, 1, A2, size2, &ipiv[size], B2, 1);
+
+		cblas_dgemm(CblasRowMajor,CblasNoTrans,CblasTrans,3,FD1_SIZE,3,1.0,H,3,vD3p,3,0.0,vD3,FD1_SIZE);
 	
 		for (int sid = 0; sid < n; sid++) {
-			Dx[(partid*n) + sid] = W[(0*size)+sid];
-			Dy[(partid*n) + sid] = W[(1*size)+sid];
-			Dz[(partid*n) + sid] = W[(2*size)+sid];
+			hDx[(partid*n) + sid] = W[(0*size)+sid];
+			hDy[(partid*n) + sid] = W[(1*size)+sid];
+			hDz[(partid*n) + sid] = W[(2*size)+sid];
+
+			hDxp[(partid*n) + sid] = B[(3*sid)+0];
+			hDyp[(partid*n) + sid] = B[(3*sid)+1];
+
+			L[(partid*n) + sid] = B2[sid]/R;
 		}
+		for (int vid = 0; vid < FD1_SIZE; vid++) {
+			vDx[(partid*FD1_SIZE) + vid] = vD3[(0*FD1_SIZE) + vid];
+			vDy[(partid*FD1_SIZE) + vid] = vD3[(1*FD1_SIZE) + vid];
+			vDz[(partid*FD1_SIZE) + vid] = vD3[(2*FD1_SIZE) + vid];
+		}
+		/*if (partid == 0 && mpi_rank == 0) {
+			printf("\nSTATUS: %d %d\nNODE %d:\tx = %1.3e\ty = %1.3e\tz = %1.3e\n",stat1,stat2,partid,X[0],X[n],X[2*n]);
+			printf("\n----> Dxyp\n"); print_generic_fp_matrix(B,size,3,FALSE);
+			printf("\n----> Dxyz\n"); print_generic_fp_matrix(W,3,size,FALSE);
+			printf("\n----> L\n"); print_generic_fp_matrix(B2,size2,1,FALSE);
+			printf("\n----> vDxyz\n"); print_generic_fp_matrix(vD3,3,FD1_SIZE,FALSE);
+		}*/
 	}
-	rbffd_DMs->Dx = Dx;
-	rbffd_DMs->Dy = Dy;
-	rbffd_DMs->Dz = Dz;
+	
+	rbffd_DMs->hDx = hDx;
+	rbffd_DMs->hDy = hDy;
+	rbffd_DMs->hDz = hDz;
+	rbffd_DMs->vDx = vDx;
+	rbffd_DMs->vDy = vDy;
+	rbffd_DMs->vDz = vDz;
+	rbffd_DMs->L = L;
+
+	rbffd_DMs->hDxp = hDxp;
+	rbffd_DMs->hDyp = hDyp;
+	memcpy((void*) rbffd_DMs->vDzp, (void*) vDzp, sizeof(double) * FD1_SIZE);
 }
 
 double L2_norm(double x, double y, double z) {
@@ -208,38 +287,45 @@ double L2_norm(double x, double y, double z) {
 
 }
 
-double phs(double r, int k) {
-
-	double val;
-	double kk = (double) k;
-	
-	if (k%2 == 0)
-		val = r == 0.0 ? r : log(r) * pow(r, kk);
-	else
-		val = pow(r, kk);
-
-	return val;
-}
-
-double ddri_phs(double r, double ri, int k) {
-	
-	double val;
-	double kk = (double) k;
+double phsrbf(double r, int k) {
 
 	if (k%2 == 0)
-		val = (r == 0.0 ? r : ri * pow(r, kk - 2.0) * (kk + log(r)));
+		return (r == 0.0 ? r : log(r) * pow(r,k));
 	else
-		val = kk * ri * pow(r, kk - 2.0);
-
-	return val;
+		return pow(r,k);
 
 }
 
+double d1_phsrbf(double r, double ri, int k) {
+	
+	if (k%2 == 0)
+		return (r == 0.0 ? r : ri * pow(r, k-2) * (k + log(r)));
+	else
+		return (k * ri * pow(r, k-2));
 
+}
 
+double garbf(double r, double epsilon) {
 
+	return exp(-pow(r*epsilon,2));
 
+}
 
+double L_garbf(double r, double epsilon, int k) {
+
+	double lagpoly[MAX_HYPERVISCOSITY_ORDER];
+
+	double epr2 = pow(epsilon*r, 2);
+
+	lagpoly[0] = 1;
+	lagpoly[1] = 4*epr2 - 4;
+
+	for (int i = 1; i < k; i++) {
+		lagpoly[i+1] = 4*(epr2 - (2*i + 1))*lagpoly[i] - (16*pow(i,2))*lagpoly[i-1];
+	}
+
+	return pow(epsilon, 2*k) * lagpoly[k] * garbf(r, epsilon);
+}
 
 
 

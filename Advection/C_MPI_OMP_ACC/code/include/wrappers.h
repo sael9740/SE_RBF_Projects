@@ -3,6 +3,8 @@
 
 #include "config.h"
 
+void get_model_ICs();
+
 void get_rt_config();
 
 void init_patch_rbffd_DMs();

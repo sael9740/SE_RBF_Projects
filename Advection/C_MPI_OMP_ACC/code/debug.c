@@ -107,8 +107,8 @@ void print_generic_fp_matrix(double* matrix, int Nrows, int Ncols, int all_ranks
 			}
 		}
 		if (all_ranks == TRUE) {
-		MPI_Barrier(MPI_COMM_WORLD);
-		usleep(1000);
+			MPI_Barrier(MPI_COMM_WORLD);
+			usleep(1000);
 		}
 	}
 }

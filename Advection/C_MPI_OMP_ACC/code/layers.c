@@ -15,35 +15,38 @@ extern phys_constants_struct phys_constants[1];
 void get_layers(layers_struct* layers, double htop, int Nv) {
 
 	// get number of ghost layers and total number of layers
-	int Nvg = GHOST_LAYER_DEPTH;
-	int Nvt = Nv + (2 * Nvg);
+	int Nvt = Nv + (2 * GHOST_SIZE);
+	int Ng = GHOST_SIZE;
 
 	// determine total number of layers with padding to ensure cache alignment
-	int pNvt = ALIGNUP(Nvt, CACHE_ALIGN);
+	int padded_Nv = ALIGNUP(Nv,CACHE_ALIGN);
+	int padded_Nvt = ALIGNUP(Nvt, CACHE_ALIGN);
 
 	// determine layer height
 	double dh = htop / Nv;
 
 	// allocate coordinate data space
-	double* h = (double*) malloc(sizeof(double) * Nvt);
-	double* r = (double*) malloc(sizeof(double) * Nvt);
+	double* h = (double*) malloc(sizeof(double) * Nv);
+	double* r = (double*) malloc(sizeof(double) * Nv);
 
 	// get Earth radius
 	double R = phys_constants->R;
 
 	// determine layer heights
-	for (int i = 0; i < Nvt; i++) {
-		double height = dh * ((i - Nvg) + .5);
+	for (int i = 0; i < Nv; i++) {
+		double height = dh * (i + .5);
 		h[i] = height;
 		r[i] = R + height;
 	}
 
 	// assign layers struct data
 	layers->Nv = Nv;
-	layers->Nvg = Nvg;
+	layers->Ng = Ng;
 	layers->Nvt = Nvt;
-	layers->pNvt = pNvt;
+	layers->padded_Nv = padded_Nv;
+	layers->padded_Nvt = padded_Nvt;
 	layers->dh = dh;
+	layers->htop = htop;
 
 	layers->h = h;
 	layers->r = r;
@@ -59,8 +62,8 @@ void print_layers(layers_struct* layers) {
 
 	for (int rank = 0; rank < mpi_size; rank++) {
 		if (rank == mpi_rank) {
-			printf("\nRank %d layers:\n\tScalars ->  \tNv = %d, \tNvg = %d, \tNvt = %d, \tpNvt = %d, \tdt = %.1f\n\tLayer Data:\n",
-					mpi_rank, layers->Nv, layers->Nvg, layers->Nvt, layers->pNvt, layers->dh); fflush(stdout);
+			printf("\nRank %d layers:\n\tScalars ->  \tNv = %d, \tNvt = %d, \tpadded_Nv = %d, \tpadded_Nvt = %d, \tdt = %.1f\n\tLayer Data:\n",
+					mpi_rank, layers->Nv, layers->Nvt, layers->padded_Nv, layers->padded_Nvt, layers->dh); fflush(stdout);
 			for (int i = 0; i < layers->Nvt; i++) {
 				printf("\t\tlayer id = %3d -> \th = %7.1f m,\tr = %9.1f m\n", i, layers->h[i], layers->r[i]); fflush(stdout);
 			}

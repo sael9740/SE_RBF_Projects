@@ -297,6 +297,128 @@ void print_halos(patch_struct* local_patch) {
 }
 
 
+part_SV_struct* allocate_part_SV_data(patch_struct* local_patch, int Ndim) {
+
+	layers_struct* layers = local_patch->layers;
+
+	int part_Nnodes = local_patch->part_Nnodes;
+	
+	int padded_Nv = layers->padded_Nv;
+	
+	part_SV_struct* part_SV = (part_SV_struct*) malloc(sizeof(part_SV_struct));
+
+	part_SV->Ndim = Ndim;
+
+	part_SV->SV_data = (double*) calloc(sizeof(double), part_Nnodes * padded_Nv * Ndim);
+
+	return part_SV;
+}
+
+patch_SV_struct* allocate_patch_SV_data(patch_struct* local_patch, int Ndim) {
+	
+	layers_struct* layers = local_patch->layers;
+	halos_struct* halos = local_patch->halos;
+
+	int Nnodes = local_patch->Nnodes;
+	
+	int padded_Nv = layers->padded_Nv;
+	int padded_Nvt = layers->padded_Nvt;
+	
+	int Nnbrs = halos->Nnbrs;
+	int halo_size_sum = halos->halo_size_sum;
+	int nbr_halo_size_sum = halos->nbr_halo_size_sum;
+
+	patch_SV_struct* patch_SV = (patch_SV_struct*) malloc(sizeof(patch_SV_struct));
+
+	patch_SV->Ndim = Ndim;
+
+	patch_SV->SV_data = (double*) calloc(sizeof(double), (Nnodes * padded_Nvt * Ndim) + CACHE_ALIGN) + CACHE_ALIGN;
+
+		
+		patch_SV->halo_buff = (double*) malloc(sizeof(double) * halo_size_sum * padded_Nvt * Ndim);
+		patch_SV->nbr_halo_buff = (double*) malloc(sizeof(double) * nbr_halo_size_sum * padded_Nvt * Ndim);
+
+		patch_SV->request = (MPI_Request*) malloc(sizeof(MPI_Request) * Nnbrs * 2);
+		patch_SV->status = (MPI_Status*) malloc(sizeof(MPI_Status) * Nnbrs * 2);
+
+	return patch_SV;
+
+}
+
+void patch_SV_diffs(patch_struct* local_patch, patch_SV_struct* SV1, patch_SV_struct* SV2) {
+
+	int Ndim = SV1->Ndim;
+
+	int Nnodes = local_patch->Nnodes;
+	
+	layers_struct* layers = local_patch->layers;
+	int Nv = layers->Nv;
+	int padded_Nvt = layers->padded_Nvt;
+
+	double* var1 = SV1->SV_data;
+	double* var2 = SV2->SV_data;
+
+	double epsilon = 1.0e-16;
+
+	for (int pid = 0; pid < Nnodes; pid++) {
+		for (int vid = 0; vid < Nv; vid++) {
+			double diff = fabs(var1[(pid*padded_Nvt) + vid] - var2[(pid*padded_Nvt) + vid]);
+			if (diff > epsilon) {
+				printf("\npid = %d, gid = %d, vid = %d, diff = %.1e, var1 = %.1e, var2 = %.1e",
+						pid,local_patch->pid2gid[pid],vid,diff,var1[(pid*padded_Nvt) + vid],var2[(pid*padded_Nvt) + vid]); usleep(100);
+			}
+		}
+	}
+}
+
+void exchange_halos(patch_struct* local_patch, patch_SV_struct* SV) {
+
+	int Ndim = SV->Ndim;
+	double* data = SV->SV_data;
+	double* halo_buff = SV->halo_buff;
+	double* nbr_halo_buff = SV->nbr_halo_buff;
+	MPI_Request* request = SV->request;
+	MPI_Status* status = SV->status;
+
+	layers_struct* layers = local_patch->layers;
+	int Nv = layers->Nv;
+	int padded_Nv = layers->padded_Nv;
+	int padded_Nvt = layers->padded_Nvt;
+
+	halos_struct* halos = local_patch->halos;
+	int Nnbrs = halos->Nnbrs;
+	int halo_size_sum = halos->halo_size_sum;
+	int nbr_halo_size_sum = halos->nbr_halo_size_sum;
+
+	// pack neighbor halo buffer
+	for (int nbr_hid = 0; nbr_hid < nbr_halo_size_sum; nbr_hid++) {
+		int pid = halos->nbr_hid2pid[nbr_hid];
+		for (int dimid = 0; dimid < Ndim; dimid++) {
+			//if (mpi_rank == 0) 
+			//printf("\nnbr_hid = %d, pid = %d, dimid = %d, linid dest = %d, linid source = %d, size = %d",nbr_hid,pid,dimid,((nbr_hid*Ndim)+dimid)*padded_Nv,((pid*Ndim)+dimid)*padded_Nvt,padded_Nv);
+			memcpy((void*) &nbr_halo_buff[((nbr_hid*Ndim)+dimid)*padded_Nv], (void*) &data[((pid*Ndim)+dimid)*padded_Nvt], sizeof(double)*padded_Nv);
+		}
+	}
+
+	// send/recv neighbor halos
+	for (int nbr = 0; nbr < Nnbrs; nbr++) {		
+		MPI_Isend((void*) &nbr_halo_buff[halos->nbr_halo_offsets[nbr] * Ndim * padded_Nv], halos->nbr_halo_sizes[nbr] * Ndim * padded_Nv, MPI_DOUBLE, halos->nbr_ranks[nbr], 0, MPI_COMM_WORLD, &request[nbr*2]);
+		MPI_Irecv((void*) &halo_buff[halos->halo_offsets[nbr] * Ndim * padded_Nv], halos->halo_sizes[nbr] * Ndim * padded_Nv, MPI_DOUBLE, halos->nbr_ranks[nbr], 0, MPI_COMM_WORLD, &request[(nbr*2)+1]);
+	}
+
+	MPI_Waitall(Nnbrs*2, request, status);
+
+	// unpack halo buffers
+	for (int hid = 0; hid < halo_size_sum; hid++) {
+		int pid = halos->hid2pid[hid];
+		for (int dimid = 0; dimid < Ndim; dimid++) {
+			//if (mpi_rank == 0) 
+			//printf("\nhid = %d, pid = %d, dimid = %d, linid dest = %d, linid source = %d, size = %d",hid,pid,dimid,((hid*Ndim)+dimid)*padded_Nv,((pid*Ndim)+dimid)*padded_Nvt,padded_Nv);
+			memcpy((void*) &data[((pid*Ndim)+dimid)*padded_Nvt], (void*) &halo_buff[((hid*Ndim)+dimid)*padded_Nv], sizeof(double)*padded_Nv);
+		}
+	}
+}
+
 /*
 // set up halos for each neighboring patch
 
