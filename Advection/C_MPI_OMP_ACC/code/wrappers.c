@@ -275,17 +275,25 @@ void init_global_nodeset() {
 
 	int Nnodes;
 	int n = rt_config->stencil_size;
-
+	double tstart;
 	// Get the global nodeset
 	if (rt_config->nodeset_from_file == TRUE) {
+		tstart = MPI_Wtime();
 		global_domains->Nnodes = get_nodeset_from_file(rt_config->nodeset_file, global_domains->global_nodeset);
+		if (mpi_rank == 0) {
+			printf("\nget_nodeset_from_file() walltime -> %.2f seconds\n", MPI_Wtime() - tstart);
+		}
 	}
 	else {
 		abort_solver("Nodeset creation not yet implemented. Please provide a NetCDF file containing a valid nodeset.");
 	}
 
 	// get stencils (idx) and weights (D) of the global nodeset
+	tstart = MPI_Wtime();
 	get_stencils(global_domains->global_nodeset, n);
+	if (mpi_rank == 0) {
+		printf("\nget_stencils() walltime -> %.2f seconds\n", MPI_Wtime() - tstart);
+	}
 
 }
 

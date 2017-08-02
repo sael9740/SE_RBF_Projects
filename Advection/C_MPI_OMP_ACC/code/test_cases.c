@@ -54,7 +54,6 @@ void init_TC2(patch_struct* local_patch) {
 	rt_config->nsteps = nsteps;
 	rt_config->dt = dt;
 
-	printf("\nRank %d: nsteps = %d, dt = %f\n",mpi_rank,nsteps,dt);
 
 	/***** Extract Relevant Values/Data *****/
 	layers_struct* layers = local_patch->layers;
