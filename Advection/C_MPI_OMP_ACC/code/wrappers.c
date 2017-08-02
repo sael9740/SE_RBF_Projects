@@ -33,29 +33,169 @@ patch_struct local_patch[1];
 
 /***** WRAPPER FUNCTIONS FOR MAIN *****/
 
-void get_model_ICs() {
+/* FUNCTION - GET_SOLUTION
+ * - Preforms timestepping of the solution
+ */
+void get_solution() {
 
-	if (TEST_CASE == 2) {
+	/***** Extract timestepping data *****/
+	int nsteps = rt_config->nsteps;
+	double dt = rt_config->dt;
 
-		init_TC2(local_patch);
+	/***** Set U and Up for initial timestep *****/
+	update_U(local_patch, 0.0);
+	update_Up(local_patch);	
+
+	int num = 0;
+	int padded_Nv = local_patch->layers->padded_Nv;
+	int padded_Nvt = local_patch->layers->padded_Nvt;
+
+	/***** Timestepping *****/
+	for (int tstep = 0; tstep < nsteps; tstep++) {
 		
-		//set_TC2_U_t(local_patch,0.0);
-		exchange_halos(local_patch, local_patch->SV_q0);
-		for (int rank = 0; rank < mpi_size; rank++) {
-			if (mpi_rank == rank) {
-				printf("\nMy Rank = %d: q0\n",rank); fflush(stdout);
-				print_generic_fp_matrix(local_patch->SV_q0->SV_data,local_patch->Nnodes,local_patch->layers->padded_Nvt,FALSE);
-				printf("\nMy Rank = %d: qt\n",rank); fflush(stdout);
-				print_generic_fp_matrix(local_patch->SV_qt->SV_data,local_patch->Nnodes,local_patch->layers->padded_Nvt,FALSE);
-				//patch_SV_diffs(local_patch, local_patch->SV_q0, local_patch->SV_qt);
-			}
-			MPI_Barrier(MPI_COMM_WORLD);
+		double t = tstep * dt;
+		if (mpi_rank == 0) {
+			printf("\nSolver Status: \ttstep = %d -> t = %.1f s", tstep, t);
 		}
 
+		/***** RK4 Substep #1 *****/
+		// F_1 = RHS of PDE for q = q_1 = q_t and U = U(t)
+		eval_partSVDotGradSV(local_patch, -1.0, local_patch->SV_Up, local_patch->SV_q_t, local_patch->SV_F);
+
+
+		/***** RK4 Substep #2 *****/
+		update_U(local_patch, t + (dt/2.0));
+		update_Up(local_patch);	
+		// q_2 = q_t + (dt/2) * F_1
+		eval_sumpatchSVpartSV(local_patch, local_patch->SV_q_t, dt/2.0, local_patch->SV_F, local_patch->SV_q_k);
+		exchange_halos(local_patch, local_patch->SV_q_k);
+		// F_2 = RHS of PDE for q = q_2 and U = U(t + dt/2)
+		eval_partSVDotGradSV(local_patch, -1.0, local_patch->SV_Up, local_patch->SV_q_k, local_patch->SV_F_k);
+		// F = F + 2 * F_2
+		eval_sumpartSVpartSV(local_patch, local_patch->SV_F, 2.0, local_patch->SV_F_k, local_patch->SV_F);
+
+
+		/***** RK4 Substep #3 *****/
+		// q_3 = q_t + (dt/2) * F_2
+		eval_sumpatchSVpartSV(local_patch, local_patch->SV_q_t, dt/2.0, local_patch->SV_F_k, local_patch->SV_q_k);
+		exchange_halos(local_patch, local_patch->SV_q_k);
+		// F_3 = RHS of PDE for q = q_3 and U = U(t + dt/2)
+		eval_partSVDotGradSV(local_patch, -1.0, local_patch->SV_Up, local_patch->SV_q_k, local_patch->SV_F_k);
+		// F = F + 2 * F_3
+		eval_sumpartSVpartSV(local_patch, local_patch->SV_F, 2.0, local_patch->SV_F_k, local_patch->SV_F);
+
+
+		/***** RK4 Substep #4 *****/
+		update_U(local_patch, t + dt);	
+		update_Up(local_patch);	
+		// q_4 = q_t + dt * F_3
+		eval_sumpatchSVpartSV(local_patch, local_patch->SV_q_t, dt, local_patch->SV_F_k, local_patch->SV_q_k);
+		exchange_halos(local_patch, local_patch->SV_q_k);
+		// F_4 = RHS of PDE for q = q_4 and U = U(t + dt)
+		eval_partSVDotGradSV(local_patch, -1.0, local_patch->SV_Up, local_patch->SV_q_k, local_patch->SV_F_k);
+		// F = F + 1 * F_4
+		eval_sumpartSVpartSV(local_patch, local_patch->SV_F, 1.0, local_patch->SV_F_k, local_patch->SV_F);
+
+
+		/***** Update Solution ****/
+		// q_t = q_t + (dt/6) * F
+		eval_sumpatchSVpartSV(local_patch, local_patch->SV_q_t, dt/6.0, local_patch->SV_F, local_patch->SV_q_t);
+		exchange_halos(local_patch, local_patch->SV_q_t);
 	}
 
 }
 
+void verify_solution() {
+
+	/***** Extract Local Patch Data *****/
+	layers_struct* layers = local_patch->layers;
+	int* partid2pid = local_patch->part_pids;
+	int part_Nnodes = local_patch->part_Nnodes;
+	int Nnodes = local_patch->Nnodes;
+	int global_Nnodes = global_domains->Nnodes;
+
+	/***** Extract Layers Data *****/
+	int Nv = layers->Nv;
+	int padded_Nv = layers->padded_Nv;
+	int Nvt = layers->Nvt;
+	int padded_Nvt = layers->padded_Nvt;
+	double dh = layers->dh;
+	double* r = layers->r;
+	double* h = layers->h;
+
+	double* q_init = local_patch->SV_q_init->data;
+	double* q_t = local_patch->SV_q_t->data;
+
+
+	double errors[10] = {0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0};
+	double results[10] = {0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0};
+
+	for (int partid = 0; partid < part_Nnodes; partid++) {
+
+		int pid = partid2pid[partid];
+
+		for (int vid = 0; vid < Nv; vid++) {
+			double q_real = q_init[(pid * padded_Nvt) + vid];
+			double q_approx = q_t[(pid * padded_Nvt) + vid];
+			double diff = fabs(q_real - q_approx);
+			errors[0] += diff;
+			errors[1] += fabs(q_real);
+			errors[2] += pow(diff,2);
+			errors[3] += pow(q_real,2);
+
+			double rho = HS_isoT_rho(h[vid]);
+			double V = (4 * PI * pow(r[vid],2) * dh)/global_Nnodes;
+			errors[4] += rho*V*q_real;
+			errors[5] += rho*V*q_approx;
+
+			errors[6] = errors[6] > diff ? errors[6] : diff;
+			errors[7] = errors[7] > fabs(q_approx) ? errors[7] : fabs(q_approx);
+
+			errors[8] = errors[8] < q_approx ? q_approx : errors[8];
+			errors[9] = errors[9] < q_approx ? errors[9] : q_approx;
+		}
+	}
+
+	MPI_Reduce((const void *) &errors[0], (void*) &results[0], 6, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+	MPI_Reduce((const void *) &errors[6], (void*) &results[6], 3, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+	MPI_Reduce((const void *) &errors[9], (void*) &results[9], 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
+
+	if (mpi_rank == 0) {
+
+		printf("\n\n======================================= Verification Results =======================================\n");
+		printf("\nExtrema:\n\tMin(q) = %e\n\tMax(q) = %e\n", results[9], results[8]);
+		printf("\nError Norms:\n\tL1(q) = %e\n\tL2(q) = %e\n\tLinf(q) = %e\n", 
+				results[0]/results[1], sqrt(results[2]/results[3]), results[6]/results[7]);
+		printf("\nTracer Mass Conservation:\n\tTotal Mass (real) -> %e kg\n\tTotal Mass (approximated) -> %e kg\n\tMass Difference -> %e kg\n\tMass Difference Ratio -> %e",
+				results[4], results[5], results[5] - results[4], fabs(results[5] - results[4])/results[4]);
+		printf("\n\n====================================================================================================\n\n");
+
+	}
+
+	MPI_Barrier(MPI_COMM_WORLD);
+}
+
+
+/* FUNCTION - GET_MODEL_ICS
+ * - Assigns the initial conditions as well as any other relevant time-independent state variable 
+ *   data that is used during the timestepping
+ */
+void get_model_ICs() {
+
+	if (TEST_CASE == 2) {
+		init_TC2(local_patch);
+	}
+	else {
+		abort_solver("Only Test Case 2 is implemented. Please set TEST_CASE=2 and rerun.");
+	}
+
+}
+
+
+/* FUNCTION - INIT_PATCH_RBFFD_DMS
+ * - Determines and assigns all differentiation weights for the RBFFD DMs and sets up all other 
+ *   data in the patch's RBFFD_DMs struct
+ */
 void init_patch_rbffd_DMs() {
 
 	get_part_rbffd_stencils(local_patch);
@@ -98,17 +238,18 @@ void init_local_patch() {
 
 	get_layers(local_patch->layers, htop, Nv);
 
-	local_patch->SV_q0 = allocate_patch_SV_data(local_patch, 1);
-	local_patch->SV_qt = allocate_patch_SV_data(local_patch, 1);
-	local_patch->SV_qt_k = allocate_patch_SV_data(local_patch, 1);
+	local_patch->SV_q_init = allocate_patch_SV_data(local_patch, 1);
+	local_patch->SV_q_t = allocate_patch_SV_data(local_patch, 1);
+	local_patch->SV_q_k = allocate_patch_SV_data(local_patch, 1);
 
 	local_patch->SV_U = allocate_part_SV_data(local_patch, 3);
+	local_patch->SV_Up = allocate_part_SV_data(local_patch, 3);
 	local_patch->SV_Usph = allocate_part_SV_data(local_patch, 3);
 
 	local_patch->SV_F = allocate_part_SV_data(local_patch, 1);
 	local_patch->SV_F_k = allocate_part_SV_data(local_patch, 1);
-	local_patch->SV_Hgradq = allocate_part_SV_data(local_patch, 3);
-	local_patch->SV_gradq = allocate_part_SV_data(local_patch, 3);
+
+	local_patch->SV_3D_temp = allocate_part_SV_data(local_patch, 3);
 
 }
 
@@ -211,6 +352,9 @@ void get_rt_config() {
 		result = getenv("ADV_USE_METIS");
 		rt_config->use_metis = result == NULL ? DEFAULT_USE_METIS : atoi(result);
 
+		result = getenv("ADV_TEST_CASE");
+		rt_config->TC = result == NULL ? DEFAULT_TEST_CASE : atoi(result);
+
 		result = getenv("ADV_STENCIL_SIZE");
 		rt_config->stencil_size = result == NULL ? DEFAULT_STENCIL_SIZE : atoi(result);
 
@@ -230,6 +374,7 @@ void get_rt_config() {
 		printf("\tADV_NODESET_FILE:      \t%s\n", rt_config->nodeset_file);
 		printf("\tADV_STENCIL_SIZE:      \t%d\n", rt_config->stencil_size);
 		printf("\tADV_USE_METIS:         \t%d\n", rt_config->use_metis);
+		printf("\tADV_TEST_CASE:         \t%d\n", rt_config->TC);
 		printf("\tADV_NUM_LAYERS:        \t%d\n", rt_config->num_layers);
 		printf("\tADV_MODEL_HEIGHT:      \t%.1f meters\n", rt_config->model_height);
 		printf("\tADV_TIMESTEP_LENGTH:   \t%.1f seconds\n", rt_config->timestep_length);

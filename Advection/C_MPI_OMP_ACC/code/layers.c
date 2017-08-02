@@ -26,17 +26,19 @@ void get_layers(layers_struct* layers, double htop, int Nv) {
 	double dh = htop / Nv;
 
 	// allocate coordinate data space
-	double* h = (double*) malloc(sizeof(double) * Nv);
-	double* r = (double*) malloc(sizeof(double) * Nv);
+	double* h = (double*) malloc(sizeof(double) * padded_Nv);
+	double* r = (double*) malloc(sizeof(double) * padded_Nv);
+	double* r_inv = (double*) malloc(sizeof(double) * padded_Nv);
 
 	// get Earth radius
 	double R = phys_constants->R;
 
 	// determine layer heights
-	for (int i = 0; i < Nv; i++) {
+	for (int i = 0; i < padded_Nv; i++) {
 		double height = dh * (i + .5);
 		h[i] = height;
 		r[i] = R + height;
+		r_inv[i] = 1/(R + height);
 	}
 
 	// assign layers struct data
@@ -50,6 +52,7 @@ void get_layers(layers_struct* layers, double htop, int Nv) {
 
 	layers->h = h;
 	layers->r = r;
+	layers->r_inv = r_inv;
 
 }
 

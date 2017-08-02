@@ -75,6 +75,7 @@ typedef struct phys_constants_struct {
 // Maximum file path size
 #define MAX_PATH_SIZE 200
 
+
 /* DEFAULT PARAMS:
  * - These values are used when the associated variable is not explicitly defined in the rt 
  *   environment.
@@ -85,6 +86,8 @@ typedef struct phys_constants_struct {
 #define DEFAULT_STENCIL_SIZE 55
 #define DEFAULT_MODEL_HEIGHT 12000.0
 #define DEFAULT_TIMESTEP 600.0
+#define DEFAULT_TEST_CASE 2
+
 
 /* RUNTIME CONFIG STRUCT:
  * - Holds all data associated with the rt environment configuration options such as input 
@@ -103,8 +106,13 @@ typedef struct rt_config_struct {
 	// RBF-FD Specifications
 	int stencil_size;
 
+	// Test Cases
+	int TC;
+
 	// Timestepping
 	double timestep_length;
+	double dt;
+	int nsteps;
 
 	// MPI
 	int use_metis;
@@ -165,6 +173,7 @@ typedef struct nodeset_struct {
 
 } nodeset_struct;
 
+
 /* STRUCT - LAYERS_STRUCT
  * - Holds all data describing the vertical layer structure of the domain
  */
@@ -188,6 +197,7 @@ typedef struct layers_struct {
 	 */
 	double* h;
 	double* r;
+	double* r_inv;
 
 
 	/***** Layer Dependent Data *****/
@@ -199,6 +209,7 @@ typedef struct layers_struct {
 	double* rho;
 
 } layers_struct;
+
 
 /* DOMAINS STRUCT:
  * - Holds the global nodeset as well as data describing the MPI partitioning of this nodeset
@@ -261,7 +272,7 @@ typedef struct halos_struct {
 	int* nbr_ranks;					// mpi ranks of neighbors
 	int* halo_sizes;				// current rank's halo sizes in neighbor patches
 	int* halo_offsets;				// offsets for each halo in coallesced halo buffer
-	int* nbr_halo_sizes;			// neighbor's halo sizse in the local patch
+	int* nbr_halo_sizes;			// neighbor's halo size in the local patch
 	int* nbr_halo_offsets;			// offsets for each halo in coallesced neighbor halo buffer
 
 
@@ -311,7 +322,7 @@ typedef struct patch_SV_struct {
 
 	int Ndim;
 	
-	double* SV_data;
+	double* data;
 
 	double* halo_buff;
 	double* nbr_halo_buff;
@@ -324,7 +335,7 @@ typedef struct patch_SV_struct {
 typedef struct part_SV_struct {
 
 	int Ndim;
-	double* SV_data;
+	double* data;
 
 } part_SV_struct;
 
@@ -341,11 +352,9 @@ typedef struct patch_struct {
 
 
 	/***** Nodeset Data *****/
-	
+
 	nodeset_struct nodeset[1];		// local patch nodeset
-
 	layers_struct layers[1];
-
 	rbffd_DMs_struct rbffd_DMs[1];
 
 	/* Mappings to/from Global Domain
@@ -360,23 +369,24 @@ typedef struct patch_struct {
 	/***** Partition and Halo Data *****/
 
 	int* part_pids;				// node ids of the patch's partition
-
 	halos_struct halos[1];		// halo layer data for all neighboring patches
+
 
 	/***** Patch/Partition Data *****/
 
-	patch_SV_struct* SV_q0;
-	patch_SV_struct* SV_qt;
-	patch_SV_struct* SV_qt_k;
+	patch_SV_struct* SV_q_init;
+	patch_SV_struct* SV_q_t;
+	patch_SV_struct* SV_q_k;
 
 	part_SV_struct* SV_U;
+	part_SV_struct* SV_Up;
 	part_SV_struct* SV_Usph;
+	
 	part_SV_struct* SV_F;
 	part_SV_struct* SV_F_k;
 
-	part_SV_struct* SV_Hgradq;
-	part_SV_struct* SV_gradq;
-
+	part_SV_struct* SV_3D_temp;
+	
 } patch_struct;
 
 #endif

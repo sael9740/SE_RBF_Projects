@@ -309,7 +309,7 @@ part_SV_struct* allocate_part_SV_data(patch_struct* local_patch, int Ndim) {
 
 	part_SV->Ndim = Ndim;
 
-	part_SV->SV_data = (double*) calloc(sizeof(double), part_Nnodes * padded_Nv * Ndim);
+	part_SV->data = (double*) calloc(sizeof(double), part_Nnodes * padded_Nv * Ndim);
 
 	return part_SV;
 }
@@ -332,14 +332,14 @@ patch_SV_struct* allocate_patch_SV_data(patch_struct* local_patch, int Ndim) {
 
 	patch_SV->Ndim = Ndim;
 
-	patch_SV->SV_data = (double*) calloc(sizeof(double), (Nnodes * padded_Nvt * Ndim) + CACHE_ALIGN) + CACHE_ALIGN;
+	patch_SV->data = (double*) calloc(sizeof(double), (Nnodes * padded_Nvt * Ndim) + CACHE_ALIGN) + CACHE_ALIGN;
 
-		
-		patch_SV->halo_buff = (double*) malloc(sizeof(double) * halo_size_sum * padded_Nvt * Ndim);
-		patch_SV->nbr_halo_buff = (double*) malloc(sizeof(double) * nbr_halo_size_sum * padded_Nvt * Ndim);
 
-		patch_SV->request = (MPI_Request*) malloc(sizeof(MPI_Request) * Nnbrs * 2);
-		patch_SV->status = (MPI_Status*) malloc(sizeof(MPI_Status) * Nnbrs * 2);
+	patch_SV->halo_buff = (double*) calloc(sizeof(double), halo_size_sum * padded_Nvt * Ndim);
+	patch_SV->nbr_halo_buff = (double*) calloc(sizeof(double), nbr_halo_size_sum * padded_Nvt * Ndim);
+
+	patch_SV->request = (MPI_Request*) malloc(sizeof(MPI_Request) * Nnbrs * 2);
+	patch_SV->status = (MPI_Status*) malloc(sizeof(MPI_Status) * Nnbrs * 2);
 
 	return patch_SV;
 
@@ -350,13 +350,13 @@ void patch_SV_diffs(patch_struct* local_patch, patch_SV_struct* SV1, patch_SV_st
 	int Ndim = SV1->Ndim;
 
 	int Nnodes = local_patch->Nnodes;
-	
+
 	layers_struct* layers = local_patch->layers;
 	int Nv = layers->Nv;
 	int padded_Nvt = layers->padded_Nvt;
 
-	double* var1 = SV1->SV_data;
-	double* var2 = SV2->SV_data;
+	double* var1 = SV1->data;
+	double* var2 = SV2->data;
 
 	double epsilon = 1.0e-16;
 
@@ -374,7 +374,7 @@ void patch_SV_diffs(patch_struct* local_patch, patch_SV_struct* SV1, patch_SV_st
 void exchange_halos(patch_struct* local_patch, patch_SV_struct* SV) {
 
 	int Ndim = SV->Ndim;
-	double* data = SV->SV_data;
+	double* data = SV->data;
 	double* halo_buff = SV->halo_buff;
 	double* nbr_halo_buff = SV->nbr_halo_buff;
 	MPI_Request* request = SV->request;
@@ -396,14 +396,14 @@ void exchange_halos(patch_struct* local_patch, patch_SV_struct* SV) {
 		for (int dimid = 0; dimid < Ndim; dimid++) {
 			//if (mpi_rank == 0) 
 			//printf("\nnbr_hid = %d, pid = %d, dimid = %d, linid dest = %d, linid source = %d, size = %d",nbr_hid,pid,dimid,((nbr_hid*Ndim)+dimid)*padded_Nv,((pid*Ndim)+dimid)*padded_Nvt,padded_Nv);
-			memcpy((void*) &nbr_halo_buff[((nbr_hid*Ndim)+dimid)*padded_Nv], (void*) &data[((pid*Ndim)+dimid)*padded_Nvt], sizeof(double)*padded_Nv);
+			memcpy((void*) &nbr_halo_buff[((nbr_hid*Ndim)+dimid)*padded_Nvt], (void*) &data[((pid*Ndim)+dimid)*padded_Nvt], sizeof(double)*padded_Nvt);
 		}
 	}
 
 	// send/recv neighbor halos
 	for (int nbr = 0; nbr < Nnbrs; nbr++) {		
-		MPI_Isend((void*) &nbr_halo_buff[halos->nbr_halo_offsets[nbr] * Ndim * padded_Nv], halos->nbr_halo_sizes[nbr] * Ndim * padded_Nv, MPI_DOUBLE, halos->nbr_ranks[nbr], 0, MPI_COMM_WORLD, &request[nbr*2]);
-		MPI_Irecv((void*) &halo_buff[halos->halo_offsets[nbr] * Ndim * padded_Nv], halos->halo_sizes[nbr] * Ndim * padded_Nv, MPI_DOUBLE, halos->nbr_ranks[nbr], 0, MPI_COMM_WORLD, &request[(nbr*2)+1]);
+		MPI_Isend((void*) &nbr_halo_buff[halos->nbr_halo_offsets[nbr] * Ndim * padded_Nvt], halos->nbr_halo_sizes[nbr] * Ndim * padded_Nvt, MPI_DOUBLE, halos->nbr_ranks[nbr], 0, MPI_COMM_WORLD, &request[nbr*2]);
+		MPI_Irecv((void*) &halo_buff[halos->halo_offsets[nbr] * Ndim * padded_Nvt], halos->halo_sizes[nbr] * Ndim * padded_Nvt, MPI_DOUBLE, halos->nbr_ranks[nbr], 0, MPI_COMM_WORLD, &request[(nbr*2)+1]);
 	}
 
 	MPI_Waitall(Nnbrs*2, request, status);
@@ -414,7 +414,7 @@ void exchange_halos(patch_struct* local_patch, patch_SV_struct* SV) {
 		for (int dimid = 0; dimid < Ndim; dimid++) {
 			//if (mpi_rank == 0) 
 			//printf("\nhid = %d, pid = %d, dimid = %d, linid dest = %d, linid source = %d, size = %d",hid,pid,dimid,((hid*Ndim)+dimid)*padded_Nv,((pid*Ndim)+dimid)*padded_Nvt,padded_Nv);
-			memcpy((void*) &data[((pid*Ndim)+dimid)*padded_Nvt], (void*) &halo_buff[((hid*Ndim)+dimid)*padded_Nv], sizeof(double)*padded_Nv);
+			memcpy((void*) &data[((pid*Ndim)+dimid)*padded_Nvt], (void*) &halo_buff[((hid*Ndim)+dimid)*padded_Nvt], sizeof(double)*padded_Nvt);
 		}
 	}
 }

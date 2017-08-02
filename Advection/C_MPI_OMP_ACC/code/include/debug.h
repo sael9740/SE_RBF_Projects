@@ -15,6 +15,6 @@ void print_part_ids(domains_struct global_domains);
 
 void print_generic_fp_matrix(double* matrix, int Nrows, int Ncols, int all_ranks);
 
-void print_generic_int_matrix(int* matrix, int Nrows, int Ncols);
+void print_generic_int_matrix(int* matrix, int Nrows, int Ncols, int all_ranks);
 
 #endif

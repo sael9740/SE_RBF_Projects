@@ -1,4 +1,4 @@
-CC = mpicc -g
+CC = mpicc
 
 ### MKL include/libs from https://software.intel.com/en-us/articles/intel-mkl-link-line-advisor
 MKLFLAGS = -DMKL_ILP64 -I${MKLROOT}/include
@@ -15,7 +15,9 @@ OMPFLAGS = -mp
 METISFLAGS = -I$(METISROOT)/include
 METISLIBS = -L$(METISROOT)/lib -lmetis
 
-CFLAGS = $(OMPFLAGS) $(MKLFLAGS) $(METISFLAGS)
+OPTFLAGS = -O3
+
+CFLAGS = $(OPTFLAGS) $(OMPFLAGS) $(MKLFLAGS) $(METISFLAGS)
 LIBS = $(MKLLIBS) $(METISLIBS)
 
 

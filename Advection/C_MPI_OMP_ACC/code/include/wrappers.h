@@ -3,9 +3,13 @@
 
 #include "config.h"
 
+void get_solution();
+
 void get_model_ICs();
 
 void get_rt_config();
+
+void verify_solution();
 
 void init_patch_rbffd_DMs();
 

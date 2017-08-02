@@ -78,7 +78,7 @@ void print_part_ids(domains_struct global_domains) {
 	}
 }
 
-void print_generic_int_matrix(int* matrix, int Nrows, int Ncols) {
+void print_generic_int_matrix(int* matrix, int Nrows, int Ncols, int all_ranks) {
 
 	for (int rank = 0; rank < mpi_size; rank++) {
 		if (rank == mpi_rank) {
@@ -90,7 +90,10 @@ void print_generic_int_matrix(int* matrix, int Nrows, int Ncols) {
 				printf("\n"); fflush(stdout);
 			}
 		}
-		MPI_Barrier(MPI_COMM_WORLD);
+		if (all_ranks == TRUE) {
+			MPI_Barrier(MPI_COMM_WORLD);
+			usleep(1000);
+		}
 	}
 }
 

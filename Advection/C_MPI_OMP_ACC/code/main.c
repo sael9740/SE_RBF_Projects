@@ -13,7 +13,6 @@ int mpi_rank;
 int main(int argc, char** argv) {
 
 	/***** Initialize MPI *****/
-	
 	MPI_Init(&argc, &argv);
 	MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
 	MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
@@ -37,43 +36,18 @@ int main(int argc, char** argv) {
 	/***** Initialize RBFFD Matrices *****/
 	init_patch_rbffd_DMs();
 
-	/***** *****/
+	/***** Set Initial Conditions *****/
 	get_model_ICs();
 
-	/***** Partitioning of Global Nodeset *****/
+	/***** Perform Timestepping *****/
+	get_solution();
 
-	/***** Global Vertical Layer Initialization *****/
+	/***** Verification *****/
+	verify_solution();
 
-//	global_domains.layers = get_layers(rt_config.model_height, rt_config.num_layers);
-
-	
-	/******************************** Local Patch Initialization **********************************/
-	
-	
-	/*nodeset_struct nodeset[1];
-	init_nodeset(nodeset);
-
-	// reorder nodes in nodeset for contiguous patch data
-	reorder_nodeset(nodeset);
-
-	// initialize local rank's patch data
-	patch_struct LP[1];
-	init_patches(LP, nodeset);
-
-	// ============================ Free Remaining Data Space ================================ //
-
-	free(nodeset->x);
-	free(nodeset->y);
-	free(nodeset->z);
-	free(nodeset->D_idx);
-	free(nodeset->idx);
-	free(nodeset->patch_ids);
-	free(nodeset->patch_start_ids);
-	free(nodeset->patch_sizes);*/
-
-	// ============================ Finalize MPI ================================ //
-
+	/***** Finalize MPI *****/
 	MPI_Barrier(MPI_COMM_WORLD);
 	MPI_Finalize();
+
 }
 
